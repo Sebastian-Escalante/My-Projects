@@ -1,5 +1,5 @@
 # My-Projects
-Repository holds two pf my projects: Aggieland Defender &amp; SAMS Beats
+Repository holds two of my projects: Aggieland Defender &amp; SAMS Beats
 
 Aggieland Defender
 A group project that I created for a class at Texas A&M Univesity. Aggielend Defender is a multiplayer web game the game is a 
