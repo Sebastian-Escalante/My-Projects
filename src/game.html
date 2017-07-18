@@ -1,0 +1,570 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="UTF-8" />
+        <title>Aggieland Defender!</title>
+        <script src="phaser.js"></script>
+		
+		<style>
+
+</style>
+		
+    </head>
+    <body>
+
+    <script type="text/javascript">
+	
+	
+	var exampleSocket;
+	
+	window.onload = function() {
+
+		var game = new Phaser.Game(800, 600, Phaser.AUTO, 'aggie-land-defender', { preload: preload, create: create, update: update });
+		//this allows for a menu screen
+		
+		//before the game loads all of neccessary images/tiles/maps are loaded
+		function preload () {
+			game.load.image('cow', 'client/longhorn_enemy.png');
+			game.load.image('tiger', 'client/tiger.png');
+			
+			game.load.image('rectangle', 'client/rectangle.png');
+			
+			game.load.spritesheet('rev', 'client/spritesheet.png', 64, 256);
+			game.load.image('bite', 'client/bite.png');
+			
+            game.load.tilemap('AM', 'client/map.json', null, Phaser.Tilemap.TILED_JSON);
+            game.load.image('tiles', 'client/tilemap.png');
+
+            game.load.audio('creepin', 'client/Creepin.mp3');
+
+        }
+		
+		var map;//describes the map
+        var layer;//describes the floor layer of the map
+        var layer2;//describes the collision layer of the map (building, trees, roads)
+        
+		var cursors;//the keyboard curser of arrow up,down,left, and right
+		
+        var rev;//the player sprite
+		var revName;
+		var playerMap = new Map();
+		var enemyMap = new Map();
+		
+		var facing = "left";//the way rev will be facing at the start of the screen
+		var bites;//a group of the type bite
+		var fireTime = 0;
+		var fireButton;//the keyboard input for when a fire ball is thrown (space bar)
+		
+		var mad_cows;//the variable for the longhorn enemy
+		var mad_tigers;
+		var total_enemies = 0;
+		var enemies_left;
+		var points = 0;
+		
+		var bmd;//bit map data
+		var bglife;//the back of the health bar
+		//var life;
+		
+		var JSONposition;
+		var colorIndex = 0;
+
+		var enemyCountText;
+		var pointsText;
+		
+		var waveText;
+		var waveNum;
+		
+		//this function creates the game by
+			//determinging physics
+			//creating the map, setting it's bounds, creating related layers, setting collisions
+			//creating the sprites (rev,mad_cow,bite), seting their start positions, enableing physics 
+		function create () {
+			exampleSocket = new WebSocket('ws://compute.cse.tamu.edu:12647');
+			exampleSocket.onopen = function (event) {
+			exampleSocket.send("Connected!"); 
+		};
+
+		exampleSocket.onmessage = function (event) {
+			var msg = JSON.parse(event.data);
+			if (msg.eventType == "Welcome") {
+				colorIndex = msg.colorIndex;
+				revName = msg.uniqueName;
+				waveNum = msg.waveNum;
+				
+				waveText = game.add.text(rev.x, rev.y, "Wave:" + waveNum, { font: "18px Arial", fill: "#FFFFFF", align: "center"});
+				waveText.fixedToCamera = true;
+				waveText.cameraOffset.setTo(200, 26);
+				
+				console.log(msg);
+			}
+			if (msg.eventType == "EntitySpawned") {
+				var entityInfo = msg.entity;
+				var posit = msg.position;
+				var name = entityInfo.name;
+				if (name == "Player") {
+					var other = game.add.sprite(200, 200, 'rev');
+					var color = entityInfo.colorIndex*4;
+					other.animations.add('wag', [color, color+1, color+2, color+3], 20, true);
+					other.play('wag');
+
+					other.anchor.setTo(0.5,0.5);
+					other.scale.setTo(0.5, 0.5);
+					game.physics.enable(other);
+					other.body.collideWorldBounds = true;
+					
+					playerMap.set(entityInfo.uniqueID, other);
+					if (entityInfo.uniqueID == revName) {
+						rev.alive = false;
+						game.world.remove(rev);
+						rev = other;
+						game.camera.follow(rev);
+					}
+					
+					other.reset(posit.x*64, posit.y*64);
+				}
+				else if (name == "Enemy") {
+					var other = game.add.sprite(game.rnd.integerInRange(65, 1790), game.rnd.integerInRange(65, 1790), 'cow');
+					other.animations.frame = entityInfo.colorIndex;
+					other.anchor.setTo(0.5,0.5);
+					other.scale.setTo(.47,.47);
+					game.physics.enable(other);
+					other.body.collideWorldBounds = true;
+					
+					enemyMap.set(entityInfo.uniqueID, other);
+				
+					other.reset(posit.x*64, posit.y*64);
+					enemies_left = enemies_left + 1;
+					total_enemies = total_enemies + 1;
+					enemyCountText.setText("Enemies "+enemies_left+"/" + total_enemies);	
+				}
+			}
+			if(msg.eventType == "MoveSet") {
+				for(var i = 0; i < msg.moveCount; i++) {
+					var boolPlayer = true
+					var p = playerMap.get(msg.moves[i].entity.uniqueID);
+					
+					if (p == undefined) {
+						p = enemyMap.get(msg.moves[i].entity.uniqueID);
+						boolPlayer = false;
+					}
+					if (p == undefined) {
+						//console.log(msg.moves[i].entity.uniqueID);
+						continue;
+					}
+					if (msg.moves[i].entity.uniqueID != revName) {
+						
+						var facingOther = msg.moves[i].facing;
+						
+						if(boolPlayer) {
+							if(facingOther == "left"){
+								p.rotation = -1.55;
+							}
+							else if(facingOther == "right"){
+								p.rotation = 1.55;
+							}
+							else if(facingOther == "up") {
+								p.rotation = 0;
+							}
+							else {
+								p.rotation = 3.15;
+							}
+						}
+						
+						
+						var move=game.add.tween(p);
+						move.to({ x: msg.moves[i].position.x*64, y: msg.moves[i].position.y*64 }, 1000);
+						move.start();
+					}
+				}
+			}
+			if(msg.eventType == "PlayerLeft") {
+				var p = playerMap.get(msg.entity.uniqueID);
+				p.alive = false;
+				p.visible = false;
+				p.exists = false;
+				playerMap.delete(msg.entity.uniqueID);
+			}
+			if(msg.eventType == "EntityDied") {
+				console.log(msg);
+				var p = enemyMap.get(msg.uniqueID);
+				if (p != undefined) {
+					p.kill();
+					//console.log(p);
+					enemyMap.delete(msg.uniqueID);
+					enemies_left = enemies_left - 1;
+					enemyCountText.setText("Enemies "+enemies_left+"/" + total_enemies);
+				}
+				p = playerMap.get(msg.uniqueID);
+				if (p != undefined) {
+					p.kill();
+				}
+			}	
+			if(msg.eventType == "RoundOver") {
+				console.log(msg);
+				rev.health = 1;
+				if(rev.alive == false) {
+					rev.alive = true;
+					rev.exists = true;
+					rev.visible = true;
+				}
+				
+				total_enemies = 0;
+				enemyCountText.setText("Enemies "+enemies_left+"/" + total_enemies);
+			
+				waveText.setText("Wave: " + (msg.roundNumber + 1));
+				
+				/*var x = 100;
+				var y = 100;
+				for(var i = 0; msg. ;i++) {
+					var winText = game.add.text(i+1 + );
+					winText.lifespan = 10000 - i -1;
+					y = y + 30;
+				}*/
+			}
+			if(msg.eventType == "GameOver") {
+				console.log(msg);
+				var overText = game.add.text(250, 100, "GAME OVER", { font: "50px Arial", fill: "#800000", strokeThickness: 6, stroke: "#FFFFFF", align: "center"});
+				overText.fixedToCamera = true;
+				var x = 250;
+				var y = 200;
+				var headText = game.add.text(x , y, "Place. Color Score",{ font: "20px Arial", stroke: "#000000", strokeThickness: 4, fill: "#F9F911", align: "center"});
+				headText.fixedToCamera = true;
+				y = y + 30;
+				for(var i = 0; i < msg.numScores ;i++) {
+					var winText = game.add.text(x , y, (i+1) +'. '+ msg.scores[i].colorName + ' ' + msg.scores[i].score,{ font: "20px Arial", stroke: "#000000", strokeThickness: 4, fill: "#F9F911", align: "center"});
+					if(revName == msg.scores[i].entity.uniqueID) {
+						//winText.addColor("#ffffff",0);
+						winText.setStyle({ font: "20px Arial", fill: "#800000", stroke: "#FFFFFF", strokeThickness: 4, align: "center"});
+					}
+					winText.fixedToCamera = true;
+					y = y + 30;
+				}
+			}
+			
+		}
+			//add  music 
+			music = game.add.audio('creepin');
+			music.loop = true;
+			music.play();
+		
+
+			game.stage.backgroundColor = '#500000';
+			//determinging physics, through phaser io
+			game.physics.startSystem(Phaser.Physics.ARCADE);
+			
+			//adding map
+            map = game.add.tilemap('AM');
+            map.addTilesetImage('tilemap', 'tiles');
+    
+			//creating layer 1
+            layer = map.createLayer('floor');
+            layer.resizeWorld();
+            layer.wrap = true;
+			
+			//creating layer 2
+            layer2 = map.createLayer('buildings');
+            layer2.resizeWorld();
+            layer2.wrap = true;
+			//setting collisions for layer 2, so that we can sprites not enter layer 2
+			map.setCollisionBetween(0, 100, true, layer2);
+			
+			//creating the rev sprite game.world.centerX+50 game.world.centerY+50
+			rev = game.add.sprite(1450, 1450, 'rev');
+			//rev.animations.add('wag', [entityInfo.colorIndex, entityInfo.colorIndex+1, entityInfo.colorIndex+2, entityInfo.colorIndex+3], 60, true);
+			//rev.play('wag');
+
+			rev.anchor.setTo(0.5,0.5);
+			rev.scale.setTo(0.5, 0.5);
+			game.camera.follow(rev);
+			game.physics.enable(rev);
+			rev.body.collideWorldBounds = true;
+			
+			//creating the bites
+			bites = game.add.group();
+			bites.enableBody = true;
+			bites.physicsBodyType = Phaser.Physics.ARCADE;
+			bites.createMultiple(30, 'bite', 0, false);
+			bites.setAll('anchor.x', 0.5);
+			bites.setAll('anchor.y', 1);
+			bites.setAll('outOfBoundsKill', true);
+			bites.setAll('checkWorldBounds', true);
+           		
+           	//create text to show how many enemies are left
+			enemies_left = total_enemies;
+			enemyCountText = game.add.text(rev.x, rev.y, "Enemies "+total_enemies+"/" + enemies_left, { font: "18px Arial", fill: "#ffffff", align: "center"});
+			enemyCountText.fixedToCamera = true;
+			enemyCountText.cameraOffset.setTo(125, 40);
+			enemyCountText.anchor.setTo(0.5, 0.5);
+           	
+			//keeps track of how many points player has
+			pointsText = game.add.text(rev.x, rev.y, "Points: "+ points, { font: "18px Arial", fill: "#ffffff", align: "center"});
+			pointsText.fixedToCamera = true;
+			pointsText.cameraOffset.setTo(120, 100);
+			pointsText.anchor.setTo(0.5, 0.5);
+
+			//creating key bindings
+            cursors = game.input.keyboard.createCursorKeys();
+			fireButton = game.input.keyboard.addKey(Phaser.Keyboard.SPACEBAR);
+			
+			
+			//this works the healthbar
+			//https://codepen.io/jdnichollsc/pen/oXXRMz?editors=0010
+			//creats first bit map data of a rectangle which is set to bglife
+			bmd = this.game.add.bitmapData(150, 20);
+			bmd.ctx.beginPath();
+			bmd.ctx.rect(0, 0, 150, 40);
+			bmd.ctx.fillStyle = '#ffffff';
+			bmd.ctx.fill();
+			
+			//this is the background to the healthbar- 60 - 100
+			bglife = this.game.add.sprite(150, 64, bmd);
+			bglife.anchor.set(0.5);
+			game.physics.enable(bglife);
+			bglife.fixedToCamera = true;//this makes the back ground stay relative to the camera
+			
+			//alters the bit map data for the health bar percentage
+			bmd = this.game.add.bitmapData(140, 15);
+			bmd.ctx.beginPath();
+			bmd.ctx.rect(0, 0, 150, 40);
+			bmd.ctx.fillStyle = '#00f910';
+			bmd.ctx.fill();
+			
+			this.widthLife = new Phaser.Rectangle(0, 0, bmd.width, bmd.height);//represents current health
+			this.totalLife = bmd.width;//represents a full health
+			
+			//this.life is the health bar to the sprite, which is altered until the sprite is dead
+			this.life = this.game.add.sprite(bglife.x/2 + 5, bglife.y, bmd);
+			game.physics.enable(this.life);
+			this.life.fixedToCamera = true;
+			this.life.anchor.y = 0.5;
+			this.life.cropEnabled = true;
+			this.life.crop(this.widthLife);
+			
+			var healthText = game.add.text(125, 53, "Health", { font: "18px Arial", fill: "#000000", align: "center"});
+			healthText.fixedToCamera = true;
+			healthText.bringToTop();
+			
+			
+			
+        }
+		
+		var updateMax = 100;
+		var updateDelay = updateMax;
+		
+		//This function runs continuously to update movements, health, attacks
+		function update() {
+			//all entities will not run out of bounds, through trees, or buidings, null, this
+			game.physics.arcade.collide([...enemyMap.values()], layer2);
+			game.physics.arcade.collide([...playerMap.values()], layer2);
+			
+			game.physics.arcade.collide([...enemyMap.values()], [...enemyMap.values()]);
+			game.physics.arcade.collide([...playerMap.values()], [...playerMap.values()]);
+			
+			//this allows the longhorn to attack reveille
+			game.physics.arcade.collide([...enemyMap.values()], [...playerMap.values()], enemyAttack, null, this);
+			
+			//this allows the bites to attack the longhorn
+			game.physics.arcade.overlap(bites, [...enemyMap.values()], fireHitEnemy, null, this);
+			
+			//stops reveille's velocity
+			rev.body.velocity.x = 0;
+			rev.body.velocity.y = 0;
+			
+			
+			//if left arrow is pressed move rev left and set facing to left, 
+				//if right arrow is pressed go right and set facing to right
+            if (cursors.left.isDown)
+            {
+                rev.body.velocity.x = -200;
+				if(facing !== "left")
+				{
+					facing = "left"
+				}
+            }
+            else if (cursors.right.isDown)
+            {
+               rev.body.velocity.x = 200;
+			   if(facing !== "right")
+				{
+					facing = "right"
+				}
+				
+            }
+			
+			//if up arrow is pressed move rev up and set facing to up, 
+				//if down arrow is pressed go down and set facing to down
+            if (cursors.up.isDown)
+            {
+                rev.body.velocity.y = -200;
+                if(facing != "up")
+                {
+                	facing = "up";
+                }
+				
+            }
+            else if (cursors.down.isDown)
+            {
+                rev.body.velocity.y = 200;
+				if(facing != "down")
+                {
+                	facing = "down";
+                }
+				
+            }
+			
+			//rotates rev based on the way she is facing
+			if(facing === "left"){
+				rev.rotation = -1.55;
+			}
+			else if(facing === "right"){
+				rev.rotation = 1.55;
+			}
+			else if(facing === "up") {
+				rev.rotation = 0;
+			}
+			else {
+				rev.rotation = 3.15;
+			}
+			
+			//send the current position and facing to the server so other clients know where you are
+			if (updateDelay == 1) {
+				JSONposition = {"eventName" : "posUpdate", "xPosition" : rev.x, "yPosition" : rev.y , "facing" : facing};
+				exampleSocket.send(JSON.stringify(JSONposition));
+				updateDelay = updateMax;
+			} else {
+				updateDelay--;
+			}
+			
+			
+			//if spacebar is hit call attack
+			if(fireButton.isDown && rev.alive)
+			{
+				attack();
+			}
+			
+			//update the health bar
+			this.life.updateCrop();
+			this.game.add.tween(this.widthLife).to( { width: (rev.health * this.totalLife) }, 200, Phaser.Easing.Linear.None, true);
+			
+			//allows player to move cam when dead
+			if(rev.alive == false) {
+				//if left arrow is pressed move rev left and set facing to left, 
+				//if right arrow is pressed go right and set facing to right
+				if (cursors.left.isDown)
+				{
+					game.camera.x -= 4;
+				}
+				else if (cursors.right.isDown)
+				{
+					game.camera.x += 4;
+				}
+				
+				//if up arrow is pressed move rev up and set facing to up, 
+					//if down arrow is pressed go down and set facing to down
+				if (cursors.up.isDown)
+				{
+					game.camera.y -= 4;
+				}
+				else if (cursors.down.isDown)
+				{
+					game.camera.y += 4;
+				}
+			}
+			
+		}
+		
+		//if there is a collision of bite and mad_cow, mad_cow will take damage
+		var text;
+		var fireHitTime = 0;
+		function fireHitEnemy(mad_cow, bite) {
+			if(game.time.now > fireHitTime) {
+				mad_cow.damage(.25);
+				text = game.add.text(mad_cow.x, mad_cow.y, "-25%", { font: "24px Arial", fill: "#F9F911", align: "center"});
+				text.lifespan = 300;
+				fireHitTime = game.time.now + 300;
+				
+				if(mad_cow.alive == false) {
+					var name;
+					for(let entr of enemyMap.entries()){
+						if (entr[1] == mad_cow) {
+							name = entr[0];
+						}
+					}
+					
+					points++;
+					pointsText.setText("Points: " + points);
+					
+					DeadPlayer = {"eventName" : "EntityDied", "uniqueID" :  name, "points" : points};
+					exampleSocket.send(JSON.stringify(DeadPlayer));
+				}
+			}
+		}
+		
+		//allows mad_cow to attack rev, if cooldown is true
+			//gives damage to rev, changes width of health bar
+			//removes health bar if rev dies
+		var text1;
+		var enemyAttackTime = 0;//keeps track of time
+		function enemyAttack (mad_cow, rev) {
+			if(game.time.now > enemyAttackTime && rev == playerMap.get(revName))
+			{
+				rev.damage(.05);
+				enemyAttackTime = game.time.now + 500;
+				text1 = game.add.text(rev.x, rev.y, "-5%", { font: "24px Arial", stroke: "#ffffff", strokeThickness: 3, fill: "#ff0000", align: "center"});
+					text1.lifespan = 500;
+				if(rev.alive == false) {
+					/*game.world.remove(bmd);
+					game.world.remove(bglife);
+					game.world.remove(this.life);
+					game.world.remove(this.totalLife);
+					game.world.remove(this.widthLife);*/
+					
+					
+					DeadPlayer = {"eventName" : "EntityDied", "uniqueID" :  revName, "points" : points};
+					exampleSocket.send(JSON.stringify(DeadPlayer));
+				}
+				else {
+					this.game.add.tween(this.widthLife).to( { width: (rev.health * this.totalLife) }, 200, Phaser.Easing.Linear.None, true);
+				}
+				
+			}
+			
+		}
+		
+		//allows rev to spit bites
+		function attack(){
+			//control how much the player will be able to fire
+			if(game.time.now > fireTime)
+			{
+				var bite = bites.getFirstExists(false);
+				bite.lifespan = 100;
+				if(facing == "up") {
+					bite.reset(rev.x, rev.y - 50);
+					bite.rotation = 0;
+				}
+				else if(facing == "down") {
+					bite.reset(rev.x, rev.y + 50);
+					bite.rotation = 3.15;
+				}
+				else if(facing == "right") {
+					bite.reset(rev.x + 50, rev.y);
+					bite.rotation = 1.55;
+				}
+				else if(facing == "left") {
+					bite.reset(rev.x - 50, rev.y);
+					bite.rotation = -1.55;
+				}
+
+				fireTime = game.time.now + 300;
+			}
+		}
+
+    };
+	
+	
+    </script>
+	
+
+
+    </body>
+</html>
